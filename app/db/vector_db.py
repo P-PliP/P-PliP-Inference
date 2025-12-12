@@ -5,6 +5,62 @@ from langchain_qdrant import QdrantVectorStore, RetrievalMode
 from langchain_upstage import UpstageEmbeddings
 from app.core.config import settings
 from app.core.sparse_encoder import SparseEncoder
+from qdrant_client.http import models
+from typing import Optional
+from langchain.retrievers import EnsembleRetriever
+
+# app/db/custom_qdrant.py
+from typing import Any, Dict, Optional, Iterable, List
+from qdrant_client.http import models as rest
+from langchain_qdrant import QdrantVectorStore
+from langchain_core.documents import Document
+
+
+class CustomQdrantVectorStore(QdrantVectorStore):
+    """
+    Qdrant payload:
+        {
+          "no": ...,
+          "title": "...",
+          "overview": "...",
+          "addr1": "...",
+          "location": {...},
+          ...
+        }
+
+    로 되어 있을 때,
+        page_content  = payload["title"]
+        metadata      = payload 전체 (title 포함)
+    으로 매핑하는 래퍼.
+    """
+
+    @classmethod
+    def _document_from_point(
+        cls,
+        scored_point: Any,
+        collection_name: str,
+        content_payload_key: str,
+        metadata_payload_key: str,
+    ) -> Document:
+        # scored_point.payload 전체를 metadata로 사용
+        payload: Dict[str, Any] = scored_point.payload or {}
+
+        # page_content: title 또는 content_payload_key 지정값
+        title_key = content_payload_key or "no"
+        page_content = str(payload.get(title_key, "no"))
+
+        # metadata: payload 전체 복사 (원하면 title 빼고 싶으면 아래 dict comprehension으로 변경)
+        metadata: Dict[str, Any] = dict(payload)
+
+        # QdrantVectorStore 기본 메타 필드 유지
+        metadata["_id"] = scored_point.id
+        metadata["_collection_name"] = collection_name
+
+        return Document(
+            page_content=page_content,
+            metadata=metadata,
+        )
+
 
 # 1. 전역 변수로 클라이언트 관리 (연결 풀 재사용)
 _qdrant_client = None
@@ -20,7 +76,6 @@ def get_qdrant_client() -> QdrantClient:
     return _qdrant_client
 
 
-# 2. 모델 로딩 (메모리 절약을 위해 lru_cache 사용)
 @lru_cache(maxsize=1)
 def get_sparse_encoder():
     print("🚀 Loading SPLADE Model... (This happens only once)")
@@ -29,32 +84,126 @@ def get_sparse_encoder():
 
 @lru_cache(maxsize=1)
 def get_dense_encoder():
-    # 검색 시에는 'embedding-query' 모델을 사용해야 성능이 좋습니다.
     return UpstageEmbeddings(
         model=settings.DENSE_MODEL_QUERY, upstage_api_key=settings.UPSTAGE_API_KEY
     )
 
 
-# 3. 최종 VectorStore 반환 함수
-def get_vector_store() -> QdrantVectorStore:
-    """
-    LangChain/LangGraph에서 바로 사용할 수 있는 VectorStore 객체를 반환합니다.
-    """
+# 2. [핵심 수정] 모드를 인자로 받는 VectorStore 생성 함수
+# 이 함수는 무거운 작업 없이 가벼운 껍데기(VectorStore)만 반환하므로 매번 호출해도 괜찮습니다.
+def create_vector_store(mode: RetrievalMode) -> QdrantVectorStore:
     client = get_qdrant_client()
     sparse_encoder = get_sparse_encoder()
     dense_encoder = get_dense_encoder()
 
-    return QdrantVectorStore(
-        client=client,
+    return CustomQdrantVectorStore.from_existing_collection(
+        # client=client,
+        url=settings.QDRANT_URL,
+        api_key=settings.QDRANT_API_KEY,
         collection_name=settings.QDRANT_COLLECTION_NAME,
-        # Dense 설정
         embedding=dense_encoder,
-        vector_name="overview_dense",  # [중요] 컬렉션 만들 때 지정한 이름
-        # Sparse 설정
+        vector_name="overview_dense",
         sparse_embedding=sparse_encoder,
-        sparse_vector_name="tags_sparse",  # [중요] 컬렉션 만들 때 지정한 이름
-        # Hybrid 모드 활성화
-        retrieval_mode=RetrievalMode.HYBRID,
-        # 메타데이터 payload 중 page_content로 쓸 필드 지정 (선택사항)
-        content_payload_key="title",
+        sparse_vector_name="tags_sparse",
+        retrieval_mode=mode,  # [중요] 여기서 모드를 설정합니다!
+        content_payload_key="no",
+    )
+
+
+# 3. Retriever 생성 함수들 수정 (search_kwargs에서 retrieval_mode 제거)
+
+
+def get_sparse_retriever(k: int, filter: Optional[models.Filter] = None):
+    # SPARSE 모드로 설정된 VectorStore를 새로 생성
+    vector_store = create_vector_store(RetrievalMode.SPARSE)
+
+    search_kwargs = {
+        "k": k,
+        "with_payload": [
+            "no",
+            "title",
+            "overview",
+            "content_type",
+            "addr1",
+            "addr2",
+            "first_image1",
+            "first_image2",
+            "content_id",
+            "homepage",
+            "tag_names",
+            "location",
+        ],
+    }
+    if filter:
+        search_kwargs["filter"] = filter
+
+    return vector_store.as_retriever(search_kwargs=search_kwargs)
+
+
+def get_dense_retriever(k: int, filter: Optional[models.Filter] = None):
+    # DENSE 모드로 설정된 VectorStore를 새로 생성
+    vector_store = create_vector_store(RetrievalMode.DENSE)
+
+    search_kwargs = {
+        "k": k,
+        "with_payload": [
+            "no",
+            "title",
+            "overview",
+            "content_type",
+            "addr1",
+            "addr2",
+            "first_image1",
+            "first_image2",
+            "content_id",
+            "homepage",
+            "tag_names",
+            "location",
+        ],
+    }
+    if filter:
+        search_kwargs["filter"] = filter
+
+    return vector_store.as_retriever(search_kwargs=search_kwargs)
+
+
+def get_hybrid_retriever(k: int, filter: Optional[models.Filter] = None):
+    # HYBRID 모드로 설정된 VectorStore를 새로 생성
+    vector_store = create_vector_store(RetrievalMode.HYBRID)
+
+    search_kwargs = {
+        "k": k,
+        "with_payload": [
+            "no",
+            "title",
+            "overview",
+            "content_type",
+            "addr1",
+            "addr2",
+            "first_image1",
+            "first_image2",
+            "content_id",
+            "homepage",
+            "tag_names",
+            "location",
+        ],
+    }
+    if filter:
+        search_kwargs["filter"] = filter
+
+    return vector_store.as_retriever(search_kwargs=search_kwargs)
+
+
+def get_ensemble_retriever(
+    dense_weight: float = 0.5,
+    sparse_weight: float = 0.5,
+    k: int = 10,
+    filter: Optional[models.Filter] = None,
+):
+    dense = get_dense_retriever(k, filter)
+    sparse = get_sparse_retriever(k, filter)
+
+    return EnsembleRetriever(
+        retrievers=[dense, sparse],
+        weights=[dense_weight, sparse_weight],
     )
