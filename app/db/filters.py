@@ -1,5 +1,5 @@
 from qdrant_client.http import models
-from typing import Optional
+from typing import Optional, Union, List
 
 
 def build_geo_fileter(lat: float, lon: float, radius_m: int = 1000) -> models.Filter:
