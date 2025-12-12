@@ -55,7 +55,7 @@ class CustomQdrantVectorStore(QdrantVectorStore):
         # QdrantVectorStore 기본 메타 필드 유지
         metadata["_id"] = scored_point.id
         metadata["_collection_name"] = collection_name
-
+        metadata["_score"] = scored_point.score
         return Document(
             page_content=page_content,
             metadata=metadata,

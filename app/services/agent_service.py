@@ -15,9 +15,13 @@ class AgentService:
         """
         사용자 쿼리와 k 값을 받아 관광지를 추천합니다.
         """
+        if request.content_type:
+            request.content_type = request.content_type if len(request.content_type) > 0 else None    
         filter = build_geo_fileter_with_content_type(
             request.lat, request.lng, request.m, request.content_type
         )
+
+
         retriever = get_ensemble_retriever(
             k=request.k, dense_weight=0.3, sparse_weight=0.7, filter=filter
         )
@@ -26,7 +30,7 @@ class AgentService:
         for doc in docs:
             raw = doc.metadata.get("tag_names") or ""
             tags = [t.strip() for t in raw.split(",") if t.strip()]
-
+            
             res.append(
                 SuggestResponse(
                     no=doc.metadata["no"],
