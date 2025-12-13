@@ -6,10 +6,11 @@ from fastapi import Depends
 from app.api.v1.request.ai_request import SuggestRequest
 from typing import List
 from app.api.v1.response.ai_response import SuggestResponse
+
 router = APIRouter()
 
 
-@router.post("/", response_model=List[SuggestResponse])
+@router.post("", response_model=List[SuggestResponse])
 async def suggest_attraction(
     request: SuggestRequest, serivce: AgentService = Depends(get_agent_service)
 ):
