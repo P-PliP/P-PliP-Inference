@@ -5,6 +5,10 @@ from app.agents.nodes.query_rewrite import rewrite_query_node
 from app.agents.nodes.similar_search import search_similar_attractions_node
 from app.agents.nodes.accommodation_search import search_accommodation_node
 from app.agents.nodes.plan_generate import generate_plan_node
+from app.core.llm import mini_llm
+from app.agents.prompts.templates import reranker_template
+from app.schemas.chat_schema import RankedDocs
+from langchain_core.output_parsers import PydanticOutputParser
 
 
 def create_plan_graph():
@@ -30,26 +34,5 @@ def create_plan_graph():
 
 app_graph = create_plan_graph()
 
-# Rerank Chain 복구 (AgentService에서 사용)
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-from app.schemas.chat_schema import RankedDocs
-from app.core.llm import mini_llm
 
-RERANK_PROMPT = ChatPromptTemplate.from_template(
-    """
-당신은 검색 결과 평가자입니다. 사용자의 질문과 문서 내용을 비교하여 관련성 점수를 매겨주세요.
-
-질문: {query}
-
-문서 목록:
-{docs_text}
-
-각 문서에 대해 0~100점 사이의 점수를 부여하세요. 높은 점수는 더 관련성이 높음을 의미합니다.
-JSON 형식으로 출력하세요.
-"""
-)
-
-rerank_chain = (
-    RERANK_PROMPT | mini_llm | PydanticOutputParser(pydantic_object=RankedDocs)
-)
+rerank_chain = reranker_template | mini_llm.with_structured_output(RankedDocs)
