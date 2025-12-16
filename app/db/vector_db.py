@@ -207,3 +207,20 @@ def get_ensemble_retriever(
         retrievers=[dense, sparse],
         weights=[dense_weight, sparse_weight],
     )
+
+
+# 4. [NEW] 직접 검색을 위한 유틸리티 함수
+async def search_hybrid(
+    query: str, limit: int = 5, filter: Optional[models.Filter] = None
+):
+    """
+    EnsembleRetriever를 사용하여 검색을 수행하고 Document 리스트를 반환합니다.
+    비동기 실행을 위해 run_in_executor 등을 사용해야 할 수 있지만,
+    여기서는 LangChain Retriever가 비동기 invoke를 지원하므로 ainvoke를 사용합니다.
+    """
+    retriever = get_ensemble_retriever(k=limit, filter=filter)
+    results = await retriever.ainvoke(query)
+
+    # Document 객체에서 payload(metadata) 추출하여 리스트로 반환
+    # similar_search Node에서 기대하는 포맷(Attraction TypedDict와 호환)으로 변환하면 좋음
+    return [doc.metadata for doc in results]
