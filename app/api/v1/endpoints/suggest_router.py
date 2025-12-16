@@ -32,5 +32,7 @@ async def generate_travel_plan(
     """
     사용자 테마와 선택한 관광지를 기반으로 여행 계획 생성
     """
-    result = await service.generate_plan(request.user_theme, request.attraction_id)
+    result = await service.generate_plan(
+        request.user_theme, request.attraction_id, request.start_date, request.end_date
+    )
     return result

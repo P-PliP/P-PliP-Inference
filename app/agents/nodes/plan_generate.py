@@ -9,6 +9,8 @@ from langchain_core.output_parsers import JsonOutputParser
 async def generate_plan_node(state: PlanState) -> PlanState:
     user_theme = state["user_theme"]
     target = state["target_attraction"]
+    start_date = state["start_date"]
+    end_date = state["end_date"]
     recommendations = state.get("recommendations", [])
     accommodations = state.get("accommodations", [])
 
@@ -23,7 +25,6 @@ async def generate_plan_node(state: PlanState) -> PlanState:
         acc_text += f"{idx}. {acc.get('title')} ({acc.get('content_type')})\n"
 
     # 프롬프트 바인딩 (오늘 날짜 주입)
-    today_str = datetime.now().strftime("%Y-%m-%d")
     chain = PLAN_GENERATE_PROMPT | mini_llm | JsonOutputParser()
 
     # LLM 호출
@@ -31,18 +32,18 @@ async def generate_plan_node(state: PlanState) -> PlanState:
         {
             "user_theme": user_theme,
             "target_attraction_title": target["title"],
-            "target_attraction_overview": target["overview"][:200]
-            + "...",  # 너무 길면 자름
+            "target_attraction_overview": target["overview"][:300] + "...",
             "recommendation_list": rec_text,
             "accommodation_list": acc_text,
-            "today": today_str,
+            "start_date": start_date,
+            "end_date": end_date,
         }
     )
 
     # 1. 메타데이터 파싱
     plan_title = result.get("plan_title", "Custom Travel Plan")
-    start_date = result.get("start_date", today_str)
-    end_date = result.get("end_date", today_str)
+    start_date = result.get("start_date", start_date)
+    end_date = result.get("end_date", end_date)
 
     # 2. ToDo 아이템에 Attraction 정보 매핑 (Location 포함)
     enriched_to_dos = []
@@ -85,18 +86,11 @@ async def generate_plan_node(state: PlanState) -> PlanState:
                 "content_type": matched_attraction.get("content_type"),
             }
         else:
-            # 매칭 실패 시 기본값
-            attraction_data = {
-                "no": 0,
-                "title": todo_name,
-                "latitude": None,
-                "longitude": None,
-                "addr1": None,
-                "overview": None,
-                "first_image1": None,
-                "first_image2": None,
-                "content_type": None,
-            }
+            # 매칭 실패 시 결과에서 제외 (Hallucination 방지 및 DB 오류 방지)
+            print(
+                f"❌ Skipping invalid attraction: '{todo_name}' (Not found in candidates)"
+            )
+            continue
 
         item["attraction"] = attraction_data
 
@@ -105,10 +99,6 @@ async def generate_plan_node(state: PlanState) -> PlanState:
             item["name"] = todo_name
         if "detail_plan_desc" not in item:
             item["detail_plan_desc"] = "상세 설명 없음"
-        if "start_at" not in item:
-            item["start_at"] = f"{today_str}T09:00:00"
-        if "end_at" not in item:
-            item["end_at"] = f"{today_str}T10:00:00"
 
         enriched_to_dos.append(item)
 

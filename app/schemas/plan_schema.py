@@ -7,6 +7,8 @@ from typing import Dict, Any
 class PlanRequest(BaseModel):
     user_theme: str = Field(description="사용자가 원하는 여행 테마")
     attraction_id: int = Field(description="중심이 되는 관광지의 ID")
+    start_date:str = Field(description="여행 시작일 (YYYY-MM-DD)")
+    end_date:str = Field(description="여행 종료일 (YYYY-MM-DD)")
 
 
 class AttractionResponse(BaseModel):
