@@ -41,7 +41,7 @@ class AgentService:
         )
 
         retriever = get_ensemble_retriever(
-            k=100, dense_weight=0.7, sparse_weight=0.3, filter=filter
+            k=100, dense_weight=0.3, sparse_weight=0.7, filter=filter
         )
 
         # retriever = MultiQueryRetriever.from_llm(
@@ -79,7 +79,7 @@ class AgentService:
         if len(docs) > 100:
 
             docs = docs[:100]
-
+        print("docs: ", docs)
         docs = await self.rerank_documents(
             query=request.query, retrieved_docs=docs, top_k=request.k
         )
@@ -153,7 +153,7 @@ class AgentService:
             batch_inputs.append({"query": query, "docs_text": docs_text})
 
         # (3) 비동기 병렬 실행 (chain.abatch 사용) -> 10개의 요청이 동시에 날아감
-
+        print(f"query: {query}")
         print(f"🔄 Reranking {len(retrieved_docs)} docs in {len(batches)} batches...")
         batch_results = await rerank_chain.abatch(batch_inputs)
 

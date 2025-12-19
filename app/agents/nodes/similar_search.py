@@ -13,7 +13,7 @@ async def search_similar_attractions_node(state: PlanState) -> PlanState:
 
     geo_filter = None
     if lat and lon:
-        geo_filter = create_geo_radius_filter(lat=lat, lon=lon, radius_km=10.0)
+        geo_filter = create_geo_radius_filter(lat=lat, lon=lon, radius_km=6.0)
 
     # 쿼리 생성
     query_text = user_theme

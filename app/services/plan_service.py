@@ -2,8 +2,8 @@ from app.agents.graph import app_graph
 
 
 class PlanService:
-    async def generate_plan(self, user_theme: str, attraction_id: int) -> dict:
-        inputs = {"user_theme": user_theme, "attraction_id": attraction_id}
+    async def generate_plan(self, user_theme: str, attraction_id: int, start_date: str, end_date: str) -> dict:
+        inputs = {"user_theme": user_theme, "attraction_id": attraction_id, "start_date": start_date, "end_date": end_date}
 
         # LangGraph 실행
         result = await app_graph.ainvoke(inputs)
