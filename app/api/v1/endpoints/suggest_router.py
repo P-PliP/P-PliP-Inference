@@ -6,7 +6,8 @@ from fastapi import Depends
 from app.api.v1.request.ai_request import SuggestRequest
 from app.api.v1.response.ai_response import SuggestResponse
 from typing import List
-from app.schemas.plan_schema import PlanRequest, PlanResponse
+from app.api.v1.response.ai_response import PlanResponse
+from app.api.v1.request.ai_request import PlanRequest
 
 router = APIRouter()
 
