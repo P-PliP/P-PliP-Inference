@@ -1,24 +1,29 @@
 from app.api.v1.request.ai_request import SuggestRequest
-
 from app.db.vector_db import get_hybrid_retriever, get_ensemble_retriever
-
 from app.db.filters import build_geo_fileter, build_geo_fileter_with_content_type
-
 from app.api.v1.response.ai_response import SuggestResponse
-
 from typing import List
-
 from langchain.schema import Document
-
 from langchain.retrievers import MultiQueryRetriever
-
 from app.agents.graph import rerank_chain
-
 from app.core.llm import mini_llm
+import time
+import asyncio
+
+sem = asyncio.Semaphore(5)  # Max 3-5 concurrent batches
+
+
+async def process_batch(batch_input):
+    async with sem:
+        try:
+            # Time limit for each batch (e.g. 60s)
+            return await rerank_chain.ainvoke(batch_input, config={"timeout": 60})
+        except Exception as e:
+            print(f"❌ Batch Rerank Error: {e}")
+            return None
 
 
 class AgentService:
-
     def __init__(self):
         pass
 
@@ -26,7 +31,6 @@ class AgentService:
         self, request: SuggestRequest
     ) -> List[SuggestResponse]:
         """
-
         사용자 쿼리와 k 값을 받아 관광지를 추천합니다.
         """
 
@@ -58,26 +62,13 @@ class AgentService:
 
         docs = await retriever.ainvoke(request.query)
 
-        # 1. 중복 제거 루틴 추가
-
-        # EnsembleRetriever 특성상, 같은 문서라도 점수가 다르면 중복으로 잡힐 수 있습니다.
-
-        # 따라서 `no`를 기준으로 중복을 제거합니다.
-
         unique_docs = {}
-
         for doc in docs:
-
             doc_id = doc.metadata.get("no")
-
             if doc_id not in unique_docs:
-
                 unique_docs[doc_id] = doc
-
         docs = list(unique_docs.values())
-
         if len(docs) > 100:
-
             docs = docs[:100]
         print("docs: ", docs)
         docs = await self.rerank_documents(
@@ -136,7 +127,7 @@ class AgentService:
                 # 전체 리스트 기준의 절대 인덱스(global_index)를 ID로 사용
 
                 global_index = (idx_start * batch_size) + i
-
+                title = doc.metadata.get("title", "")
                 content_preview = doc.metadata.get("overview", "")[:500].replace(
                     "\n", " "
                 )
@@ -145,30 +136,40 @@ class AgentService:
                     =========================
 
                     Document ID: {global_index}
-
+                    title: {title}
                     Content: {content_preview}
                     =========================
                     """
 
             batch_inputs.append({"query": query, "docs_text": docs_text})
 
-        # (3) 비동기 병렬 실행 (chain.abatch 사용) -> 10개의 요청이 동시에 날아감
         print(f"query: {query}")
         print(f"🔄 Reranking {len(retrieved_docs)} docs in {len(batches)} batches...")
-        batch_results = await rerank_chain.abatch(batch_inputs)
 
-        print(batch_results)
+        start_time = time.time()
 
+        try:
+            print("⏳ Starting batch execution...")
+            # Use gather instead of abatch for better control
+            raw_results = await asyncio.gather(
+                *[process_batch(b) for b in batch_inputs]
+            )
+
+            # Filter out None results from failed batches
+            batch_results = [r for r in raw_results if r is not None]
+
+            print(
+                f"✅ Batch execution finished in {time.time() - start_time:.2f} seconds"
+            )
+        except Exception as e:
+            print(f"❌ Error during batch execution: {e}")
+            raise e
+        # print(batch_results)
         # (4) 결과 취합 및 정렬
-
         unique_scores = {}
-
         for res in batch_results:
-
             if res and res.results:
-
                 for item in res.results:
-
                     unique_scores[item.doc_id] = item.score
 
         # 점수 기준 내림차순 정렬
@@ -176,24 +177,14 @@ class AgentService:
         sorted_doc_ids = sorted(
             unique_scores.keys(), key=lambda k: unique_scores[k], reverse=True
         )
-
         # (5) Top K 추출 및 원본 문서 매핑
-
         final_docs = []
 
         print("\n📊 Top Ranked Docs:")
         for item in sorted_doc_ids[:top_k]:
-
             original_doc = retrieved_docs[item]
-
-            # 메타데이터에 점수 추가 (선택사항)
-
             original_doc.metadata["relevance_score"] = unique_scores[item]
-
             if unique_scores[item] > 0:
-
                 final_docs.append(original_doc)
-
             print(f"- [Score: {unique_scores[item]}] ID: {item}")
-
         return final_docs
